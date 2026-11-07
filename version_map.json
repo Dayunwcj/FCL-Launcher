@@ -1,0 +1,20 @@
+[
+  {
+    "type": "release",
+    "versionCode": 1345,
+    "versionName": "1.3.4.5",
+    "date": "2026.11.07",
+    "description": [
+      {
+        "lang": "en",
+        "text": "(Translated from Chinese by AI)\n1. Added parallel download resumption: when a single connection stays slow, the remaining data is automatically split into chunks fetched over multiple connections, breaking through per-connection speed caps of slow sources (such as net-disk direct-link mirrors); fast servers are unaffected (#1960)\n2. A confirmation dialog now appears before modpack versions' per-launch auto-restore reinstalls missing files: files to be restored are listed (including mods the user deleted or updated), with options to continue, skip this launch, or disable auto-restore (re-enable anytime in version settings) (#1990)\n3. The skin model settings menu on the main screen is now opened with a two-finger tap instead of a double-click (which conflicted with rotate/zoom gestures), with a new guide hint and a tap sound effect that can be turned off in the skin settings\n4. Fixed the screen being shifted up twice by the input method (causing a black screen) and the in-game keyboard toggle requiring two taps (#1997)\n5. Fixed the background image being stretched after launching while the screen had been off: it is now proportionally center-cropped to the view's live size, staying correct across rotation, folding and other size changes\n6. Fixed an abnormal animation when switching the selected version in the version list\n7. The launch flow was refactored to be coroutine-driven: authentication failures can be retried repeatedly while Microsoft login progress is kept across retries (internal improvement)"
+      },
+      {
+        "lang": "zh_CN",
+        "text": "(若启动器内下载缓慢请使用网盘下载,64位的请下载arm64，不知道该下哪个的请下载all）\n1.新增文件下载并行续传：单连接持续低速时自动切换多连接分块拉取剩余区间，突破按连接数限速的慢速源（如网盘直链镜像），快服务器不受影响 (#1960)\n2.整合包版本启动时的自动补全在恢复文件前新增弹窗确认：列出将被恢复的缺失文件（含被主动删除或更新的模组），可选继续补全、跳过本次或不再自动补全（版本设置中可随时改回） (#1990)\n3.主界面皮肤模型的设置菜单改双指点击触发（原双击易与旋转缩放手势冲突），新增引导提示与点击音效，音效可在皮肤设置中关闭\n4.修复输入法双倍抬升画面导致黑屏、游戏内软键盘开关需点两次的问题 (#1997)\n5.修复背景图息屏启动后比例拉伸：改按视图实时尺寸等比居中裁剪，旋转、折叠等尺寸变化场景同样保持正确比例\n6.修复版本列表切换选中版本时出现异常动画\n7.启动流程重构为协程驱动，认证失败可反复重试且重试期间保留微软登录进度（内部优化）"
+      }
+    ],
+    "netdiskUrl": "https://pan.quark.cn/s/c9037fe0af14",
+    "url": "https://github.com/FCL-Team/FoldCraftLauncher/releases/download/1.3.4.5/FCL-release-1.3.4.5-all.apk"
+  }
+]

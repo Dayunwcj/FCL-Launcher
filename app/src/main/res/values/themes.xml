@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      用系统自带的 Material 深色主题做底，Compose 自己会把内容铺满，
+      所以这里只需要 NoActionBar + 透明状态栏配色。
+    -->
+    <style name="Theme.MCLauncher" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF121212</item>
+        <item name="android:statusBarColor">#FF121212</item>
+        <item name="android:navigationBarColor">#FF121212</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

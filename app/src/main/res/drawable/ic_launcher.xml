@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 一个占位的启动图标（草方块风格），省得编译时缺 mipmap 报错 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FF6AA84F"
+        android:pathData="M0,0h108v108h-108z" />
+    <path
+        android:fillColor="#FF7F6000"
+        android:pathData="M0,54h108v54h-108z" />
+    <path
+        android:fillColor="#FF38761D"
+        android:pathData="M18,18h18v18h-18z" />
+    <path
+        android:fillColor="#FF38761D"
+        android:pathData="M54,36h18v18h-18z" />
+    <path
+        android:fillColor="#FF38761D"
+        android:pathData="M36,72h18v18h-18z" />
+</vector>

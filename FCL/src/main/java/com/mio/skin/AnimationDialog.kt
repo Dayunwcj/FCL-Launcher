@@ -1,0 +1,92 @@
+package com.mio.skin
+
+import android.content.Context
+import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
+import androidx.appcompat.widget.LinearLayoutCompat
+import com.mio.ui.applySelectableItemStyle
+import com.mio.ui.dialogCardBackground
+import com.mio.util.getScreenWidth
+import com.tungsten.fcl.databinding.DialogAnimationSwitchBinding
+import com.tungsten.fcl.databinding.ItemAnimationBinding
+import com.tungsten.fcllibrary.component.dialog.FCLDialog
+
+/** 动画选中回调（SAM 接口，便于 Java 侧 lambda 调用） */
+fun interface OnAnimationSelectedListener {
+    fun onSelected(animation: PlayerAnimation)
+}
+
+/** 3D 皮肤层开关回调（SAM 接口，便于 Java 侧 lambda 调用），参数为新的开关状态 */
+fun interface OnOverlayToggledListener {
+    fun onToggled(enabled: Boolean)
+}
+
+/**
+ * 皮肤模型设置弹窗：顶部 3D 皮肤层与点击音效开关，下方列出全部支持的动画并标记当前项；
+ * 点动画条目即切换并关闭，开关切换即时生效且保持弹窗打开。
+ */
+class AnimationDialog(
+    context: Context,
+    private val current: PlayerAnimation?,
+    private val overlayEnabled: Boolean,
+    private val onSelected: OnAnimationSelectedListener,
+    private val onOverlayToggled: OnOverlayToggledListener
+) : FCLDialog(context) {
+
+    private val binding = DialogAnimationSwitchBinding.inflate(layoutInflater)
+    private val density = context.resources.displayMetrics.density
+
+    init {
+        setContentView(binding.root)
+        setCancelable(true)
+
+        binding.solidLayerSwitch.isChecked = overlayEnabled
+        binding.solidLayerRow.background = dialogCardBackground(context, density)
+        binding.solidLayerRow.setOnClickListener { binding.solidLayerSwitch.toggle() }
+        binding.solidLayerSwitch.setOnCheckedChangeListener { _, checked ->
+            onOverlayToggled.onToggled(checked)
+        }
+
+        // 点击音效开关：直接读写 SkinTapSound 单例（全局状态，非渲染器状态）
+        binding.tapSoundSwitch.isChecked = SkinTapSound.isEnabled
+        binding.tapSoundRow.background = dialogCardBackground(context, density)
+        binding.tapSoundRow.setOnClickListener { binding.tapSoundSwitch.toggle() }
+        binding.tapSoundSwitch.setOnCheckedChangeListener { _, checked ->
+            SkinTapSound.setEnabled(checked)
+        }
+
+        SkinAnimations.entries.forEach { entry ->
+            val selected = current != null && entry.type == current.javaClass
+            binding.container.addView(createRow(entry.nameRes, entry.factory(), selected), rowParams())
+        }
+    }
+
+    private fun createRow(nameRes: Int, animation: PlayerAnimation, selected: Boolean): View {
+        val row = ItemAnimationBinding.inflate(layoutInflater)
+        row.text.setText(nameRes)
+        row.root.setOnClickListener {
+            onSelected.onSelected(animation)
+            dismiss()
+        }
+        // 选中态统一样式：当前动画主题色底 + 勾选，其余普通卡片
+        applySelectableItemStyle(context, row.root, row.check, selected, density)
+        return row.root
+    }
+
+    private fun rowParams(): LinearLayoutCompat.LayoutParams {
+        val params = LinearLayoutCompat.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        params.topMargin = (6 * density).toInt()
+        params.marginStart = (3 * density).toInt()
+        params.marginEnd = (3 * density).toInt()
+        return params
+    }
+
+    override fun show() {
+        window?.setLayout(getScreenWidth() / 2, WindowManager.LayoutParams.WRAP_CONTENT)
+        super.show()
+    }
+}

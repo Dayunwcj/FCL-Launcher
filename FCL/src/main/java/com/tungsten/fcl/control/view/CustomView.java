@@ -1,0 +1,30 @@
+package com.tungsten.fcl.control.view;
+
+import com.tungsten.fcl.control.data.CustomControl;
+
+public interface CustomView {
+    /** 编辑模式参考组（ghost）控件的透明度 */
+    float GHOST_ALPHA = 0.4f;
+
+    CustomControl.ViewType getType();
+    String getViewId();
+
+    /**
+     * 标记为编辑模式参考组控件：半透明显示、不响应触摸、参与拖动吸附
+     */
+    void setGhost(boolean ghost);
+    boolean isGhost();
+
+    /**
+     * 编辑模式选中态：显示选中框与缩放手柄，再次轻点弹出编辑对话框
+     */
+    void setSelected(boolean selected);
+    boolean isSelected();
+    void switchParentVisibility();
+
+    /**
+     * 直接设置参考组显隐状态（绑定组"按下显示/按下隐藏"用，区别于切换）
+     */
+    void setParentVisibility(boolean parentVisibility);
+    void removeListener();
+}

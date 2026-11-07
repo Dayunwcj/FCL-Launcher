@@ -1,0 +1,88 @@
+package com.mio.ui.dialog
+
+import android.content.Context
+import android.view.WindowManager
+import androidx.recyclerview.widget.LinearLayoutManager
+import com.mio.data.Renderer
+import com.mio.manager.RendererManager
+import com.mio.plugin.RendererPlugin
+import com.mio.ui.adapter.RendererSelectItemAdapter
+import com.mio.ui.adapter.SpacingItemDecoration
+import com.mio.util.getScreenHeight
+import com.mio.util.getScreenWidth
+import com.tungsten.fcl.R
+import com.tungsten.fcl.databinding.DialogRendererSelectBinding
+import com.tungsten.fcl.setting.Profiles
+import com.tungsten.fcllibrary.component.dialog.FCLDialog
+import com.tungsten.fcllibrary.util.ConvertUtils
+import java.util.function.Consumer
+
+class RendererSelectDialog(
+    context: Context,
+    val isGlobal: Boolean,
+    val callback: Consumer<String>
+) : FCLDialog(context) {
+
+    init {
+        val params = window?.attributes
+        params?.width = ConvertUtils.dip2px(context, 500f)
+        val ratio = getScreenWidth().toFloat() / getScreenHeight().toFloat()
+        if (ratio >= 1.5f) {
+            params?.height = WindowManager.LayoutParams.MATCH_PARENT
+        } else {
+            params?.height = getScreenHeight() * 1 / 2
+        }
+        window?.attributes = params
+        val binding = DialogRendererSelectBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+        binding.title.text = context.getString(R.string.settings_fcl_renderer)
+        val currentId = currentRendererId()
+        // 齿轮图标：内置渲染器的可配置环境变量，复用插件页同款 RendererEnvDialog
+        val configCallback: (Renderer) -> Unit = { renderer ->
+            val specs = RendererPlugin.builtinEnvSpecs(context, renderer.id)
+            if (specs.isNotEmpty()) {
+                RendererEnvDialog(context, renderer.name, specs) { values ->
+                    RendererPlugin.updateBuiltinEnvConfigs(context, renderer.id, values)
+                }.show()
+            }
+        }
+        val adapter = RendererSelectItemAdapter(
+            context,
+            RendererManager.rendererList,
+            currentId,
+            configCallback
+        ) { renderer ->
+            val versionSetting =
+                if (isGlobal) Profiles.getSelectedProfile().globalVersionSetting else Profiles.getSelectedProfile().versionSetting
+            versionSetting.renderer = renderer.id
+            dismiss()
+            callback.accept(renderer.des)
+        }
+        binding.recyclerView.layoutManager = LinearLayoutManager(context)
+        binding.recyclerView.addItemDecoration(
+            SpacingItemDecoration(ConvertUtils.dip2px(context, 10f))
+        )
+        binding.recyclerView.adapter = adapter
+        // 打开时定位到当前选中的渲染器（首次布局前调用，LayoutManager 会从该位置开始布局）
+        val selectedIndex = RendererManager.rendererList.indexOfFirst { it.id == currentId }
+        if (selectedIndex > 0) {
+            binding.recyclerView.scrollToPosition(selectedIndex)
+        }
+        binding.refresh.setOnClickListener {
+            RendererManager.refresh(context)
+            // rendererList 是同一实例被 clear 后重填，直接全量刷新
+            adapter.notifyDataSetChanged()
+        }
+        binding.advanced.setOnClickListener {
+            RendererAdvancedDialog(context).show()
+        }
+        binding.cancel.setOnClickListener {
+            dismiss()
+        }
+    }
+
+    private fun currentRendererId(): String {
+        return if (isGlobal) Profiles.getSelectedProfile().globalVersionSetting.renderer
+        else Profiles.getSelectedProfile().versionSetting.renderer
+    }
+}
