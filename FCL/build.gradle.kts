@@ -11,7 +11,6 @@ plugins {
     id("org.jetbrains.kotlin.android")
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
-    id("org.jetbrains.kotlin.plugin.compose") version "2.4.10"
 }
 
 android {
@@ -21,6 +20,11 @@ android {
     defaultConfig {
         minSdk = libs.versions.minSdk.get().toInt()
         // library 模块不再支持 targetSdk/versionName（AGP 8 起弃用，由 :app 提供）
+
+        // 只编 arm64：GL4ES / JRE 都以 arm64 为主，4 个 ABI 全编既慢又没必要
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
 
         externalNativeBuild {
             cmake {
@@ -55,7 +59,6 @@ android {
         buildConfig = true
         resValues = true
         prefab = true
-        compose = true
     }
 
     externalNativeBuild {

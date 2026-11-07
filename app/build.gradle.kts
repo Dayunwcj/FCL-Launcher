@@ -44,7 +44,12 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
-            pickFirsts += listOf("**/libbytehook.so")
+            pickFirsts += listOf(
+                "**/libbytehook.so",
+                "**/libglxshim.so",     // FCL 自带 jniLibs 与 kopper-zink AAR 各有一份
+                "**/libEGL_mesa.so",
+                "**/libOSMesa.so"
+            )
         }
     }
 
@@ -63,6 +68,7 @@ kotlin {
 dependencies {
     // 启动后端：FCL（libpojavexec.so / libfcl.so / libgl4es_114.so + JVMActivity）
     implementation(project(":FCL"))
+    implementation(libs.appcompat)   // JVMActivity 继承自 AppCompatActivity
 
     coreLibraryDesugaring(libs.desugar.jdk.libs)
 
@@ -74,8 +80,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.activity:activity-compose:1.9.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.6.2")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
     implementation("androidx.core:core-ktx:1.13.0")
 
     // 网络 / 协程 / 解压
