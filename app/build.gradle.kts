@@ -53,6 +53,11 @@ android {
         }
     }
 
+    // .xz 已经是压缩格式，再让 aapt 压一遍既慢又没收益
+    androidResources {
+        noCompress += listOf("xz")
+    }
+
     lint {
         abortOnError = false
         checkReleaseBuilds = false

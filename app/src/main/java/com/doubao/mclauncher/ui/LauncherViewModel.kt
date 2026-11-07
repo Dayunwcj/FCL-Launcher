@@ -25,6 +25,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.doubao.mclauncher.core.McVersion
 import com.doubao.mclauncher.core.VersionResolver
+import com.doubao.mclauncher.launch.BundledJre
 import com.doubao.mclauncher.launch.FclCompat
 import com.doubao.mclauncher.mod.Modrinth
 import com.doubao.mclauncher.mod.ModsManager
@@ -239,6 +240,12 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
                     try {
                         val major = VersionResolver.resolveLocal(versionId).version.javaMajorVersion
                         if (!FclCompat.isFclJreInstalled(ctx, major)) {
+                            // ① 优先用 APK 内置的 JRE：完全离线，不用等下载
+                            if (BundledJre.isBundled(ctx, major)) {
+                                BundledJre.install(ctx, major) { appendLog(it) }
+                                _state.value = _state.value.copy(jreMajors = JreInstaller.installedMajors(ctx))
+                                appendLog("内置 Java $major 安装完成，继续启动")
+                            } else {
                             val build = JreRemote.CATALOG.firstOrNull { it.major == major }
                             if (build != null) {
                                 appendLog("未检测到 Java $major，自动下载并安装（仅首次，约 ${build.sizeBytes / 1024 / 1024} MB）…")
@@ -253,6 +260,7 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
                                 _state.value = _state.value.copy(jreMajors = JreInstaller.installedMajors(ctx))
                             } else {
                                 appendLog("警告：没有 Java $major 的自动安装源，尝试直接启动")
+                            }
                             }
                         }
                     } catch (e: Throwable) {
