@@ -1,7 +1,4 @@
-# ============================================================
-# 云端编 debug APK（含 FCL 原生层，NDK 必须真编）
-# 仓库根目录 = merge-工程/ 这一层
-# ============================================================
+# 合并工程编译：:app 是 application，:FCL 是它的后端库（含全部 JNI/CMake）
 name: Build APK
 
 on:
@@ -12,7 +9,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: 取源码
@@ -24,14 +21,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: 装 Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: 装 SDK / NDK / CMake
+      # runner 镜像里已经带了 SDK（ANDROID_HOME 已设好），这一步只补我们要的组件
+      - name: 装 NDK / CMake / platform
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
-          sdkmanager "ndk;27.0.12077973" "cmake;3.22.1"
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          echo "SDK=$SDK"
+          SDKM=$(ls -d "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | tail -1)
+          echo "sdkmanager=$SDKM"
+          "$SDKM" --version
+          yes | "$SDKM" --licenses > /dev/null 2>&1 || true
+          "$SDKM" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          "$SDKM" "ndk;27.0.12077973" "cmake;3.22.1"
+          echo "sdk.dir=$SDK" > local.properties
 
       - name: 缓存 Gradle
         uses: actions/cache@v4
@@ -39,16 +40,17 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml') }}
+          key: gradle-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-
 
-      - name: 编译（:app 是主模块，:FCL 是它的后端库）
+      - name: 编译
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
       - name: 校验原生 so 真的进包
         run: |
           APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
           echo "APK=$APK"
+          unzip -l "$APK" | grep "lib/arm64-v8a" | head -30
           for so in libpojavexec.so libpojavexec_awt.so libfcl.so libandroidnsbypass.so libgl4es_114.so libbytehook.so libopenal.so; do
             if unzip -l "$APK" | grep -q "lib/arm64-v8a/$so"; then
               echo "OK   lib/arm64-v8a/$so"
