@@ -1,0 +1,66 @@
+# ============================================================
+# 云端编 debug APK（含 FCL 原生层，NDK 必须真编）
+# 仓库根目录 = merge-工程/ 这一层
+# ============================================================
+name: Build APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: 取源码
+        uses: actions/checkout@v4
+
+      - name: 装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 装 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 装 SDK / NDK / CMake
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+          sdkmanager "ndk;27.0.12077973" "cmake;3.22.1"
+
+      - name: 缓存 Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml') }}
+          restore-keys: gradle-
+
+      - name: 编译（:app 是主模块，:FCL 是它的后端库）
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: 校验原生 so 真的进包
+        run: |
+          APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          echo "APK=$APK"
+          for so in libpojavexec.so libpojavexec_awt.so libfcl.so libandroidnsbypass.so libgl4es_114.so libbytehook.so libopenal.so; do
+            if unzip -l "$APK" | grep -q "lib/arm64-v8a/$so"; then
+              echo "OK   lib/arm64-v8a/$so"
+            else
+              echo "::error::缺少 lib/arm64-v8a/$so（NDK 没编成功）"
+              exit 1
+            fi
+          done
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FCLauncher-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
