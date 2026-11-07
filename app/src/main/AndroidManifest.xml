@@ -15,7 +15,7 @@
         android:allowNativeHeapPointerTagging="false"
         android:extractNativeLibs="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="豆包MC启动器"
+        android:label="大运"
         android:largeHeap="true"
         android:networkSecurityConfig="@xml/network_security_config"
         android:requestLegacyExternalStorage="true"

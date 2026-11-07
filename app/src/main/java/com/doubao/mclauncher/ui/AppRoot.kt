@@ -74,6 +74,8 @@ import com.doubao.mclauncher.core.RemoteVersion
 import com.doubao.mclauncher.launch.JreLocator
 import com.doubao.mclauncher.launch.JreRemote
 import com.doubao.mclauncher.launch.PojavBridge
+import com.doubao.mclauncher.mod.Modrinth
+import com.doubao.mclauncher.mod.ModsManager
 import kotlin.math.roundToInt
 
 /**
@@ -149,6 +151,7 @@ fun AppRoot(vm: LauncherViewModel = viewModel()) {
                             Screen.HOME -> "MC 启动器"
                             Screen.VERSIONS -> "选择版本"
                             Screen.JRE -> "Java 运行时"
+                            Screen.MODS -> "模组仓库（Modrinth）"
                         }
                     )
                 },
@@ -176,6 +179,7 @@ fun AppRoot(vm: LauncherViewModel = viewModel()) {
                     state = state,
                     onOpenVersions = { vm.setScreen(Screen.VERSIONS) },
                     onOpenJre = { vm.setScreen(Screen.JRE) },
+                    onOpenMods = { vm.setScreen(Screen.MODS) },
                     onRequestStorage = ::requestStorage,
                     onLaunch = { launchingVersion = it },
                     onExport = { vm.exportToPojav() },
@@ -188,6 +192,18 @@ fun AppRoot(vm: LauncherViewModel = viewModel()) {
                     state = state,
                     onPick = { pendingVersion = it },
                     onRetry = { vm.loadVersions() }
+                )
+
+                Screen.MODS -> ModsScreen(
+                    state = state,
+                    onQueryChange = { vm.setModQuery(it) },
+                    onSearch = { vm.searchMods() },
+                    onGameVersionChange = { vm.setModGameVersion(it) },
+                    onLoaderChange = { vm.setModLoader(it) },
+                    onInstall = { vm.installMod(it) },
+                    onDelete = { vm.deleteMod(it) },
+                    onToggle = { vm.toggleMod(it) },
+                    onRefreshMods = { vm.refreshMods() }
                 )
 
                 Screen.JRE -> JreScreen(
@@ -281,6 +297,7 @@ private fun HomeScreen(
     state: UiState,
     onOpenVersions: () -> Unit,
     onOpenJre: () -> Unit,
+    onOpenMods: () -> Unit,
     onRequestStorage: () -> Unit,
     onLaunch: (String) -> Unit,
     onExport: () -> Unit,
@@ -322,11 +339,16 @@ private fun HomeScreen(
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f)) {
-                Text("一键导出到 Pojav")
+            Button(onClick = onOpenMods, modifier = Modifier.weight(1f)) {
+                Text("模组仓库")
             }
             OutlinedButton(onClick = onOpenJre, modifier = Modifier.weight(1f)) {
                 Text("Java 运行时")
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f)) {
+                Text("一键导出到 Pojav")
             }
         }
 
@@ -779,6 +801,134 @@ private fun JreScreen(
 }
 
 /** 复制文本到剪贴板（导出时把路径给用户，方便粘到 Pojav 的目录选择框） */
+// ================================================================
+// 模组仓库页（Modrinth 开放 API，无需 API Key）
+// ================================================================
+@Composable
+private fun ModsScreen(
+    state: UiState,
+    onQueryChange: (String) -> Unit,
+    onSearch: () -> Unit,
+    onGameVersionChange: (String) -> Unit,
+    onLoaderChange: (String) -> Unit,
+    onInstall: (Modrinth.Project) -> Unit,
+    onDelete: (java.io.File) -> Unit,
+    onToggle: (java.io.File) -> Unit,
+    onRefreshMods: () -> Unit
+) {
+    val loaders = listOf("fabric", "forge", "quilt", "neoforge")
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+        // ---- 过滤条件 ----
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = state.modGameVersion,
+                onValueChange = onGameVersionChange,
+                label = { Text("游戏版本") },
+                singleLine = true,
+                modifier = Modifier.weight(1f)
+            )
+            Button(onClick = onSearch) { Text("搜索") }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            loaders.forEach { l ->
+                FilterChip(
+                    selected = state.modLoader == l,
+                    onClick = { onLoaderChange(l) },
+                    label = { Text(l) }
+                )
+            }
+        }
+        OutlinedTextField(
+            value = state.modQuery,
+            onValueChange = onQueryChange,
+            label = { Text("关键词，如 sodium / jei / fabric-api") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        if (state.modBusy) {
+            Spacer(Modifier.height(8.dp))
+            Text(state.modStage, fontSize = 12.sp)
+            if (state.modProgress >= 0f) {
+                LinearProgressIndicator(progress = { state.modProgress }, modifier = Modifier.fillMaxWidth())
+            } else {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+        }
+        state.modMessage?.let {
+            Text(it, fontSize = 12.sp, color = Color(0xFF5B8C3E))
+        }
+        state.modError?.let {
+            Text(it, fontSize = 12.sp, color = Color(0xFFFF6E40))
+        }
+
+        // ---- 已装模组 ----
+        Row(
+            Modifier.fillMaxWidth().padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("已装模组 (${state.installedMods.size})", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            TextButton(onClick = onRefreshMods) { Text("刷新") }
+        }
+        Text(ModsManager.modsDir().absolutePath, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Color.Gray)
+
+        if (state.installedMods.isNotEmpty()) {
+            Card {
+                Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    state.installedMods.take(8).forEach { f ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                f.name + if (f.name.endsWith(".disabled")) "（已禁用）" else "",
+                                fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = { onToggle(f) }) {
+                                Text(if (f.name.endsWith(".disabled")) "启用" else "禁用", fontSize = 11.sp)
+                            }
+                            TextButton(onClick = { onDelete(f) }) { Text("删除", fontSize = 11.sp, color = Color(0xFFD84315)) }
+                        }
+                    }
+                    if (state.installedMods.size > 8) {
+                        Text("…共 ${state.installedMods.size} 个", fontSize = 11.sp, color = Color.Gray)
+                    }
+                }
+            }
+        }
+
+        // ---- 搜索结果 ----
+        if (state.modsLoading) {
+            Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        }
+        LazyColumn(Modifier.weight(1f).padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(state.modResults, key = { it.slug }) { p ->
+                Card {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(p.title, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                            Text("${p.downloads / 1000}K 下载", fontSize = 11.sp, color = Color.Gray)
+                        }
+                        Text(p.description, fontSize = 12.sp, maxLines = 3)
+                        Text(
+                            p.loaders.joinToString(" / ") + " · " + p.categories.take(4).joinToString(", "),
+                            fontSize = 10.sp, color = Color.Gray
+                        )
+                        Row {
+                            Spacer(Modifier.weight(1f))
+                            Button(onClick = { onInstall(p) }, enabled = !state.modBusy) {
+                                Text(if (state.modBusy) "忙…" else "安装（自动带依赖）")
+                            }
+                        }
+                    }
+                }
+            }
+            item { Spacer(Modifier.height(40.dp)) }
+        }
+    }
+}
+
 private fun copyToClipboard(context: Context, text: String) {
     try {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager

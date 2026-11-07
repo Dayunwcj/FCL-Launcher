@@ -24,10 +24,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.doubao.mclauncher.core.McVersion
+import com.doubao.mclauncher.core.VersionResolver
+import com.doubao.mclauncher.launch.FclCompat
+import com.doubao.mclauncher.mod.Modrinth
+import com.doubao.mclauncher.mod.ModsManager
 import java.io.File
 
 /** 界面状态机 */
-enum class Screen { HOME, VERSIONS, JRE }
+enum class Screen { HOME, VERSIONS, JRE, MODS }
 
 /** 加载器类型 */
 enum class LoaderType { VANILLA, FORGE, FABRIC }
@@ -56,7 +60,19 @@ data class UiState(
     // ---- JRE 安装页相关 ----
     val jreBusy: Boolean = false,
     val jreProgress: Float = -1f,
-    val jreStage: String = ""
+    val jreStage: String = "",
+    // ---- 模组页相关 ----
+    val modQuery: String = "",
+    val modGameVersion: String = "1.20.1",
+    val modLoader: String = "fabric",
+    val modResults: List<Modrinth.Project> = emptyList(),
+    val modsLoading: Boolean = false,
+    val modError: String? = null,
+    val installedMods: List<File> = emptyList(),
+    val modBusy: Boolean = false,
+    val modStage: String = "",
+    val modProgress: Float = -1f,
+    val modMessage: String? = null
 )
 
 /**
@@ -219,6 +235,30 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
                     // ---- 优先走 FCL 后端（合并进 FCL 工程后才存在这个类）----
                     // 用反射调用，好处是：没合并时本工程照样能编（类不存在 → 反射失败 → 走旧路径），
                     // 合进 FCL 工程后自动切到真渲染后端，不用再改 UI 代码。
+                    // ---- 一键启动：JRE 没装就自己下载装上，用户什么都不用管 ----
+                    try {
+                        val major = VersionResolver.resolveLocal(versionId).version.javaMajorVersion
+                        if (!FclCompat.isFclJreInstalled(ctx, major)) {
+                            val build = JreRemote.CATALOG.firstOrNull { it.major == major }
+                            if (build != null) {
+                                appendLog("未检测到 Java $major，自动下载并安装（仅首次，约 ${build.sizeBytes / 1024 / 1024} MB）…")
+                                JreRemote.install(
+                                    ctx, build,
+                                    onProgress = { p, _, _ ->
+                                        _state.value = _state.value.copy(progress = p, stage = "安装 Java $major")
+                                    },
+                                    onLog = { appendLog(it) }
+                                )
+                                appendLog("Java $major 安装完成，继续启动")
+                                _state.value = _state.value.copy(jreMajors = JreInstaller.installedMajors(ctx))
+                            } else {
+                                appendLog("警告：没有 Java $major 的自动安装源，尝试直接启动")
+                            }
+                        }
+                    } catch (e: Throwable) {
+                        appendLog("自动安装 JRE 失败（继续尝试启动）: ${e.message}")
+                    }
+
                     appendLog("尝试 FCL 后端 …")
                     val fcl = runCatching {
                         Class.forName("com.doubao.mclauncher.backend.FclLauncher")
@@ -395,6 +435,99 @@ class LauncherViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 从文件选择器拿到的 JRE 压缩包，装进私有 runtimes 目录 */
+
+    // ------------------------------------------------------------
+    // 模组：搜索 / 安装（含依赖递归）/ 删除
+    // ------------------------------------------------------------
+    fun setModQuery(q: String) { _state.value = _state.value.copy(modQuery = q) }
+    fun setModGameVersion(v: String) { _state.value = _state.value.copy(modGameVersion = v) }
+    fun setModLoader(v: String) { _state.value = _state.value.copy(modLoader = v) }
+
+    /** 搜索模组：Modrinth 开放 API，不需要 key */
+    fun searchMods(query: String = _state.value.modQuery) {
+        val gv = _state.value.modGameVersion.trim()
+        val loader = _state.value.modLoader
+        if (gv.isEmpty()) {
+            _state.value = _state.value.copy(modError = "先填游戏版本（例如 1.20.1）")
+            return
+        }
+        viewModelScope.launch {
+            _state.value = _state.value.copy(modsLoading = true, modError = null, modQuery = query)
+            try {
+                val hits = withContext(Dispatchers.IO) { Modrinth.search(query, gv, loader) }
+                _state.value = _state.value.copy(modsLoading = false, modResults = hits)
+                if (hits.isEmpty()) {
+                    _state.value = _state.value.copy(modError = "没搜到结果（$gv / $loader）")
+                }
+            } catch (e: Throwable) {
+                _state.value = _state.value.copy(
+                    modsLoading = false,
+                    modError = "搜索失败: ${e.message}"
+                )
+            }
+        }
+    }
+
+    /**
+     * 安装一个模组：自动带上 required 依赖（Fabric API 这类），
+     * 全部下载到 /sdcard/games/Minecraft/mods。
+     */
+    fun installMod(project: Modrinth.Project) {
+        if (_state.value.modBusy) return
+        val gv = _state.value.modGameVersion.trim()
+        val loader = _state.value.modLoader
+        viewModelScope.launch {
+            _state.value = _state.value.copy(
+                modBusy = true, modStage = "解析 ${project.title} 的依赖…", modProgress = -1f, modMessage = null
+            )
+            try {
+                val targets = withContext(Dispatchers.IO) { Modrinth.resolve(project.slug, gv, loader) }
+                if (targets.isEmpty()) {
+                    _state.value = _state.value.copy(modBusy = false, modMessage = "这个模组没有适配 $gv / $loader 的版本")
+                    return@launch
+                }
+                var idx = 0
+                for (t in targets) {
+                    idx++
+                    _state.value = _state.value.copy(
+                        modStage = "($idx/${targets.size}) 下载 ${t.file.fileName}"
+                    )
+                    withContext(Dispatchers.IO) {
+                        ModsManager.download(t.file) { p ->
+                            _state.value = _state.value.copy(modProgress = p)
+                        }
+                    }
+                }
+                val mods = ModsManager.list()
+                _state.value = _state.value.copy(
+                    modBusy = false,
+                    modProgress = 1f,
+                    installedMods = mods,
+                    modMessage = "已安装 ${targets.size} 个文件（含依赖）到 ${ModsManager.modsDir().absolutePath}"
+                )
+            } catch (e: Throwable) {
+                _state.value = _state.value.copy(modBusy = false, modMessage = "安装失败: ${e.message}")
+            }
+        }
+    }
+
+    fun deleteMod(file: File) {
+        ModsManager.delete(file)
+        _state.value = _state.value.copy(
+            installedMods = ModsManager.list(),
+            modMessage = "已删除 ${file.name}"
+        )
+    }
+
+    fun toggleMod(file: File) {
+        ModsManager.toggle(file)
+        _state.value = _state.value.copy(installedMods = ModsManager.list())
+    }
+
+    fun refreshMods() {
+        _state.value = _state.value.copy(installedMods = ModsManager.list())
+    }
+
     fun installJreFromUri(uri: android.net.Uri, major: Int) {
         viewModelScope.launch(Dispatchers.IO) {
             try {

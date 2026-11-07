@@ -59,6 +59,9 @@ object Paths {
 
     fun logs(): File = File(root(), "logs")
 
+    /** 模组目录：FCL 启动时按 workingDir/mods 加载，必须和它对齐 */
+    fun mods(): File = File(root(), "mods")
+
     /** 确保目录存在，返回自身方便链式调用 */
     fun ensure(vararg dirs: File): Unit {
         dirs.forEach { if (!it.exists()) it.mkdirs() }
