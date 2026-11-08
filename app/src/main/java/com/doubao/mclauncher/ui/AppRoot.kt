@@ -769,8 +769,8 @@ private fun JreScreen(
         }
 
         Text(
-            "注：Pojav 的仓库只提供 Java 8 / 17 的 arm64 包，没有 21。\n" +
-                "MC 1.20.5 以上要求 Java 21，这类版本请直接走方案 B（Pojav 启动）。",
+            "注：Java 8 / 17 / 21 三套 arm64 运行时就打在 APK 里，点启动会自动按版本选对应的，全程不用联网下载。\n" +
+                "这里的下载/导入只是给缺失或损坏时兜底用的。",
             fontSize = 11.sp, color = Color.Gray
         )
         Spacer(Modifier.height(40.dp))
