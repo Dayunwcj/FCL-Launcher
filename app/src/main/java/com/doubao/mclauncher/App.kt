@@ -22,6 +22,16 @@ class App : com.tungsten.fcl.FCLApp() {
         Paths.ensure(Paths.root(), Paths.versions(), Paths.libraries(), Paths.assets(), Paths.logs())
         JreInstaller.ensureDir(this)
 
+        // FCL 的 CallbackBridge 静态初始化里有 Choreographer.getInstance()（必须有 Looper）。
+        // 启动是在后台线程做的，所以必须现在（主线程）先把这个类初始化好，否则启动时必报
+        // ExceptionInInitializerError: null。
+        try {
+            Class.forName("org.lwjgl.glfw.CallbackBridge", true, classLoader)
+            android.util.Log.i("App", "CallbackBridge 已在主线程完成初始化")
+        } catch (t: Throwable) {
+            android.util.Log.w("App", "预热 CallbackBridge 失败: ${t.javaClass.simpleName} ${t.message}")
+        }
+
         // 首次启动就在后台把内置的 Java 17 解好，
         // 这样用户点「启动」时不用等解压，也不用联网下载（全程离线）
         Thread({

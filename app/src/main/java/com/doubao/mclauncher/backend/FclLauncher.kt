@@ -3,6 +3,8 @@ package com.doubao.mclauncher.backend
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.doubao.mclauncher.core.Paths
 import com.doubao.mclauncher.core.VersionResolver
@@ -94,8 +96,27 @@ object FclLauncher {
             null
         } catch (e: Throwable) {
             Log.e(TAG, "launch failed", e)
-            "${e.javaClass.simpleName}: ${e.message}"
+            describeThrowable(e)
         }
+    }
+
+    /**
+     * 把异常摊开写成人能看懂的样子：类名 + 消息 + 前几帧 + cause 链。
+     * ExceptionInInitializerError 的 message 常常是 null，只有栈帧能说明是哪个类挂了。
+     */
+    private fun describeThrowable(e: Throwable): String {
+        val sb = StringBuilder()
+        var t: Throwable? = e
+        var depth = 0
+        while (t != null && depth < 4) {
+            if (depth > 0) sb.append("由 ").append(t.javaClass.name).append(" 引起: ")
+            else sb.append(t.javaClass.name).append(": ")
+            sb.append(t.message ?: "(无消息，静态初始化失败)").append('\n')
+            t.stackTrace.take(5).forEach { sb.append("    at ").append(it.toString()).append('\n') }
+            t = t.cause
+            depth++
+        }
+        return sb.toString().trim()
     }
 
     private fun doLaunch(
@@ -209,22 +230,39 @@ object FclLauncher {
         // ---------- 5. 拉起 ----------
         Log.i(TAG, "启动 $versionId，JRE=$jreDir，渲染器=$rendererKey，classpath ${classpath.size} 项")
 
-        // 1.13+ 的版本用「输入栈队列」，旧版用即时投递；FCL 自己也是这么判的
-        CallbackBridge.nativeSetUseInputStackQueue(version.arguments != null)
+        // 1.13+ 的版本用「输入栈队列」，旧版用即时投递；FCL 自己也是这么判的。
+        // 注意：CallbackBridge 的静态初始化里有 Choreographer.getInstance()，必须在有 Looper 的线程上先完成，
+        // 否则这里是 ExceptionInInitializerError。App.onCreate 已经在主线程预热过这个类，这里再加一层保险。
+        try {
+            CallbackBridge.nativeSetUseInputStackQueue(version.arguments != null)
+        } catch (e: Throwable) {
+            Log.w(TAG, "设置输入队列标记失败（不影响启动）: ${e.javaClass.simpleName}")
+        }
 
         val bridge: FCLBridge = FCLauncher.launchMinecraft(config)
-        bridge.setScaleFactor(1.0)
-        bridge.setController("Default")
-        bridge.setGameDir(gameDir.absolutePath)
-        bridge.setJava("Java $major")
+        Log.i(TAG, "FCLBridge 已创建，转到主线程拉起 JVMActivity")
 
-        JVMActivity.setFCLBridge(bridge, MenuType.GAME)
+        // FCL 自己的流程里这一步都在 Activity（主线程）里做：
+        // setFCLBridge 会给 CallbackBridge 塞 bridge 引用，startActivity 也需要主线程的上下文，
+        // 所以这里统一 post 到主线程，别在工作线程硬来。
+        Handler(Looper.getMainLooper()).post {
+            try {
+                bridge.setScaleFactor(1.0)
+                bridge.setController("Default")
+                bridge.setGameDir(gameDir.absolutePath)
+                bridge.setJava("Java $major")
 
-        val intent = Intent(ctx, JVMActivity::class.java)
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        intent.putExtra("controller", "Default")
-        intent.putExtra("TERRACOTTA_PLAYER", playerName)
-        ctx.startActivity(intent)
+                JVMActivity.setFCLBridge(bridge, MenuType.GAME)
+
+                val intent = Intent(ctx, JVMActivity::class.java)
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                intent.putExtra("controller", "Default")
+                intent.putExtra("TERRACOTTA_PLAYER", playerName)
+                ctx.startActivity(intent)
+            } catch (t: Throwable) {
+                Log.e(TAG, "拉起 JVMActivity 失败", t)
+            }
+        }
     }
 
     /**
