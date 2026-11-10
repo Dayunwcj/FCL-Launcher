@@ -128,6 +128,45 @@ class GameInstaller(private val downloader: Downloader = Downloader()) {
     }
 
     /**
+     * 只补缺 —— 启动前的自愈。
+     *
+     * 场景：老安装包可能只下了 client.jar（或下载中断），进游戏就报
+     * NoClassDefFoundError: joptsimple/OptionSpec 这类错（classpath 里只有 client.jar）。
+     * 这里读**本地**版本 json，把缺失的 client.jar 与 libraries 补下来，不碰 assets、不请求版本列表。
+     *
+     * @return 实际补的文件数（0 表示本来就是齐的）
+     */
+    suspend fun repairMissing(versionId: String, onLog: (String) -> Unit = {}): Int = withContext(Dispatchers.IO) {
+        val jsonFile = Paths.versionJson(versionId)
+        if (!jsonFile.isFile) return@withContext 0
+        val version = McVersion(JSONObject(jsonFile.readText()))
+
+        val items = ArrayList<Downloader.Item>()
+
+        // 1) client.jar
+        val jar = Paths.clientJar(versionId)
+        if (!jar.isFile) {
+            version.clientJarUrl?.let { items += Downloader.Item(it, jar, version.clientJarSha1, version.clientJarSize) }
+        }
+
+        // 2) libraries：只补缺失的
+        for (lib in version.libraries) {
+            val art = lib.artifact ?: continue
+            if (art.path.isEmpty() || art.url.isEmpty()) continue
+            val dest = File(Paths.libraries(), art.path)
+            if (!dest.isFile) items += Downloader.Item(art.url, dest, art.sha1, art.size)
+        }
+
+        if (items.isEmpty()) return@withContext 0
+        onLog("检测到 ${items.size} 个依赖文件缺失，自动补齐…")
+        downloader.downloadAll(items, concurrency = 6) { p ->
+            onLog("补齐依赖 ${p.doneFiles}/${p.totalFiles}")
+        }
+        onLog("依赖补齐完成（${items.size} 个文件）")
+        items.size
+    }
+
+    /**
      * 下载资源索引 + 所有 object。
      *
      * assets 的 url 规律：
