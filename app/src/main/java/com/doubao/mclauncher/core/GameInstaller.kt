@@ -136,7 +136,11 @@ class GameInstaller(private val downloader: Downloader = Downloader()) {
      *
      * @return 实际补的文件数（0 表示本来就是齐的）
      */
-    suspend fun repairMissing(versionId: String, onLog: (String) -> Unit = {}): Int = withContext(Dispatchers.IO) {
+    suspend fun repairMissing(
+        versionId: String,
+        includeAssets: Boolean = true,
+        onLog: (String) -> Unit = {}
+    ): Int = withContext(Dispatchers.IO) {
         val jsonFile = Paths.versionJson(versionId)
         if (!jsonFile.isFile) return@withContext 0
         val version = McVersion(JSONObject(jsonFile.readText()))
@@ -157,12 +161,24 @@ class GameInstaller(private val downloader: Downloader = Downloader()) {
             if (!dest.isFile) items += Downloader.Item(art.url, dest, art.sha1, art.size)
         }
 
-        if (items.isEmpty()) return@withContext 0
-        onLog("检测到 ${items.size} 个依赖文件缺失，自动补齐…")
+        // 3) 资源索引缺失（assets/indexes/<id>.json）：游戏会刷 "Can't open the resource index file"
+        val indexFile = File(Paths.assetIndexes(), "${version.assetsIndexName}.json")
+        val needAssets = includeAssets && !indexFile.isFile
+
+        if (items.isEmpty() && !needAssets) return@withContext 0
+        if (items.isNotEmpty()) {
+            onLog("检测到 ${items.size} 个依赖文件缺失，自动补齐…")
         downloader.downloadAll(items, concurrency = 6) { p ->
             onLog("补齐依赖 ${p.doneFiles}/${p.totalFiles}")
         }
         onLog("依赖补齐完成（${items.size} 个文件）")
+        }
+
+        if (needAssets) {
+            onLog("资源索引缺失，开始补资源（文件很多，网络慢的话要等一会儿）")
+            installAssets(version, { s, p -> if (p > 0.99f) onLog(s) }, onLog)
+            onLog("资源补齐完成")
+        }
         items.size
     }
 

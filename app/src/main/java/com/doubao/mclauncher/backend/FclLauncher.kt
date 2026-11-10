@@ -337,22 +337,20 @@ object FclBootstrap {
         if (resourcesReady) return
         FCLPath.loadPaths(ctx)
         Paths.ensure(Paths.root(), Paths.versions(), Paths.libraries(), Paths.assets(), Paths.logs())
-        val pairs = listOf(
-            File(FCLPath.LWJGL_DIR, "3.3.3").absolutePath to "/assets/app_runtime/lwjgl/3.3.3",
-            File(FCLPath.LWJGL_DIR, "3.4.1").absolutePath to "/assets/app_runtime/lwjgl/3.4.1",
-            FCLPath.JNA_PATH to "/assets/app_runtime/jna",
-            FCLPath.CACIOCAVALLO_8_DIR to "/assets/app_runtime/caciocavallo",
-            FCLPath.CACIOCAVALLO_17_DIR to "/assets/app_runtime/caciocavallo17"
-        )
-        for ((target, asset) in pairs) {
-            try {
-                if (!RuntimeUtils.isLatest(target, asset)) {
-                    onLog("安装 FCL 资源 $asset → $target")
-                    RuntimeUtils.install(ctx, target, asset)
-                }
-            } catch (e: Throwable) {
-                Log.w("FclBootstrap", "安装 $asset 失败: ${e.javaClass.simpleName} ${e.message}")
-            }
+        // 注意：不要用 FCL 的 RuntimeUtils.install。
+        // 它的 isLatest() 走 Class.getResourceAsStream("/assets/...")，在 APK 里读不到 assets，
+        // 于是永远返回 true（"已是最新"），结果 LWJGL 目录一直空着，classpath 里一个 lwjgl jar 都没有。
+        // 这里改成直接用 Context.getAssets() 递归拷贝。
+        try {
+            copyAssetTree(ctx, "app_runtime/lwjgl/3.3.3", File(FCLPath.LWJGL_DIR, "3.3.3"), onLog)
+            copyAssetTree(ctx, "app_runtime/lwjgl/3.4.1", File(FCLPath.LWJGL_DIR, "3.4.1"), onLog)
+            copyAssetTree(ctx, "app_runtime/caciocavallo", File(FCLPath.CACIOCAVALLO_8_DIR), onLog)
+            copyAssetTree(ctx, "app_runtime/caciocavallo17", File(FCLPath.CACIOCAVALLO_17_DIR), onLog)
+            copyJna(ctx, onLog)
+            // FCL 的 wrapper jar（mio.Wrapper 主类在里面），缺了就只能直接跑 mainClass
+            copyAssetFile(ctx, "game/MioLaunchWrapper.jar", File(FCLPath.MIO_LAUNCH_WRAPPER), onLog)
+        } catch (e: Throwable) {
+            Log.w("FclBootstrap", "铺 FCL 资源失败: ${e.javaClass.simpleName} ${e.message}")
         }
         // 兜底：version 文件可能在 jar 写完前就落盘了（安装被中断过），
         // 这时 isLatest 会误判为已装，结果是目录空着、classpath 里一个 lwjgl 都没有。
@@ -360,10 +358,10 @@ object FclBootstrap {
         val hasJar = lwjgl333.walkTopDown().any { it.isFile && it.name.endsWith(".jar") }
         if (!hasJar) {
             try {
-                onLog("LWJGL 3.3.3 资源不完整，强制重装")
-                RuntimeUtils.install(ctx, lwjgl333.absolutePath, "/assets/app_runtime/lwjgl/3.3.3")
+                onLog("LWJGL 3.3.3 资源不完整，重新拷贝")
+                copyAssetTree(ctx, "app_runtime/lwjgl/3.3.3", lwjgl333, onLog)
             } catch (e: Throwable) {
-                Log.w("FclBootstrap", "强制重装 LWJGL 失败: ${e.message}")
+                Log.w("FclBootstrap", "重拷 LWJGL 失败: ${e.message}")
             }
         }
         resourcesReady = true
@@ -397,5 +395,54 @@ object FclBootstrap {
                 }
             }
         }, "fcl-bootstrap").start()
+    }
+
+    /** 递归把 assets 下的目录整棵拷到磁盘（已存在且大小一致的跳过） */
+    private fun copyAssetTree(ctx: Context, assetDir: String, destDir: File, onLog: (String) -> Unit) {
+        destDir.mkdirs()
+        val children = ctx.assets.list(assetDir).orEmpty()
+        if (children.isEmpty()) {
+            // 叶子：assets.list 对文件返回空数组，这里当作"单个文件"处理
+            if (assetDir.substringAfterLast('.', "").isNotEmpty()) {
+                copyAssetFile(ctx, assetDir, destDir, onLog)
+            }
+            return
+        }
+        for (name in children) {
+            val childAsset = "$assetDir/$name"
+            val childDest = File(destDir, name)
+            val grandchildren = ctx.assets.list(childAsset).orEmpty()
+            if (grandchildren.isNotEmpty()) {
+                copyAssetTree(ctx, childAsset, childDest, onLog)
+            } else {
+                copyAssetFile(ctx, childAsset, childDest, onLog)
+            }
+        }
+    }
+
+    private fun copyAssetFile(ctx: Context, assetPath: String, dest: File, onLog: (String) -> Unit) {
+        dest.parentFile?.mkdirs()
+        // APK 里的 jar 是被压缩过的，openFd 会失败；这里只要文件在、非空就当作已拷过
+        if (dest.isFile && dest.length() > 0) return
+        ctx.assets.open(assetPath).use { input ->
+            dest.outputStream().use { out -> input.copyTo(out, 64 * 1024) }
+        }
+        Log.i("FclBootstrap", "拷贝资产 $assetPath → ${dest.absolutePath}")
+    }
+
+    /** JNA：assets 按 <版本>/natives/<abi>/ 存，运行时要求 <版本>/libjnidispatch.so */
+    private fun copyJna(ctx: Context, onLog: (String) -> Unit) {
+        val rootAsset = "app_runtime/jna"
+        val rootDest = File(FCLPath.JNA_PATH).apply { mkdirs() }
+        val versions = ctx.assets.list(rootAsset).orEmpty()
+        for (v in versions) {
+            val vDir = File(rootDest, v).apply { mkdirs() }
+            copyAssetTree(ctx, "$rootAsset/$v", vDir, onLog)
+            val abi = "arm64-v8a"
+            val soAsset = "$rootAsset/$v/natives/$abi/libjnidispatch.so"
+            val soDest = File(vDir, "libjnidispatch.so")
+            runCatching { copyAssetFile(ctx, soAsset, soDest, onLog) }
+                .onFailure { Log.w("FclBootstrap", "拷贝 jna so 失败: ${it.message}") }
+        }
     }
 }
